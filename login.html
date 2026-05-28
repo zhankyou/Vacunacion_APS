@@ -13,19 +13,33 @@
       --bg: #F3F7F5;
       --text: #0F1F16;
       --border: #DDE8E2;
+      --muted: #5C7268;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'DM Sans', sans-serif; background: var(--bg); display: flex; align-items: center; justify-content: center; height: 100vh; }
+
     .login-container { background: var(--surface); padding: 2.5rem; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; max-width: 400px; text-align: center; }
     .logo-icon { font-size: 3rem; margin-bottom: 10px; }
     h1 { font-family: 'Syne', sans-serif; color: var(--primary); font-size: 1.5rem; margin-bottom: 5px; }
-    p { color: #5C7268; font-size: 0.9rem; margin-bottom: 2rem; }
+    p { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+
     .input-group { text-align: left; margin-bottom: 1.2rem; }
     .input-group label { display: block; font-size: 0.8rem; font-weight: 700; color: var(--text); margin-bottom: 5px; text-transform: uppercase; }
-    .input-group input { width: 100%; padding: 12px; border: 1.5px solid var(--border); border-radius: 8px; font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.2s; }
-    .input-group input:focus { border-color: var(--accent); }
+
+    .input-wrapper { position: relative; display: flex; align-items: center; }
+    .input-wrapper input { width: 100%; padding: 12px; border: 1.5px solid var(--border); border-radius: 8px; font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.2s; }
+    .input-wrapper input:focus { border-color: var(--accent); }
+
+    /* Espacio extra para que el texto no se monte sobre el icono */
+    #password { padding-right: 45px; }
+
+    .toggle-pwd { position: absolute; right: 12px; background: none; border: none; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s; padding: 4px; }
+    .toggle-pwd:hover { color: var(--primary); }
+
     .btn { width: 100%; padding: 14px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-weight: 700; font-family: 'Syne', sans-serif; font-size: 1rem; cursor: pointer; transition: background 0.2s; margin-top: 10px; }
     .btn:hover { background: #1A5C43; }
+    .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
     #error-msg { color: #DC2626; font-size: 0.85rem; margin-top: 15px; display: none; font-weight: 500; }
   </style>
 </head>
@@ -38,11 +52,25 @@
     <form id="loginForm">
       <div class="input-group">
         <label>Usuario / Correo</label>
-        <input type="text" id="email" required autocomplete="username">
+        <div class="input-wrapper">
+          <input type="text" id="email" required autocomplete="username">
+        </div>
       </div>
       <div class="input-group">
         <label>Contraseña</label>
-        <input type="password" id="password" required autocomplete="current-password">
+        <div class="input-wrapper">
+          <input type="password" id="password" required autocomplete="current-password">
+          <button type="button" class="toggle-pwd" id="toggleBtn" aria-label="Mostrar contraseña" title="Mostrar/Ocultar contraseña">
+            <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            <svg id="eyeOffIcon" style="display: none;" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+              <line x1="1" y1="1" x2="23" y2="23"></line>
+            </svg>
+          </button>
+        </div>
       </div>
       <button type="submit" class="btn" id="btnSubmit">Ingresar</button>
       <div id="error-msg"></div>
@@ -50,10 +78,29 @@
   </div>
 
   <script>
+    // Lógica para mostrar/ocultar contraseña
+    const pwdInput = document.getElementById('password');
+    const toggleBtn = document.getElementById('toggleBtn');
+    const eyeIcon = document.getElementById('eyeIcon');
+    const eyeOffIcon = document.getElementById('eyeOffIcon');
+
+    toggleBtn.addEventListener('click', () => {
+        if (pwdInput.type === 'password') {
+            pwdInput.type = 'text';
+            eyeIcon.style.display = 'none';
+            eyeOffIcon.style.display = 'block';
+        } else {
+            pwdInput.type = 'password';
+            eyeIcon.style.display = 'block';
+            eyeOffIcon.style.display = 'none';
+        }
+    });
+
+    // Lógica de Autenticación
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
+        const password = pwdInput.value;
         const btn = document.getElementById('btnSubmit');
         const errorMsg = document.getElementById('error-msg');
 
