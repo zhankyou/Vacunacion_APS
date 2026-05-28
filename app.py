@@ -39,6 +39,7 @@ logger = logging.getLogger("VACUNACION_API")
 app = Flask(__name__, static_folder=DIR_BASE)
 CORS(app)
 
+
 # =====================================================================
 # CONEXIÓN A BASE DE DATOS Y CONFIGURACIÓN DE SEGURIDAD
 # =====================================================================
@@ -51,7 +52,9 @@ def get_engine():
     cadena = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?sslmode=require"
     return create_engine(cadena, pool_pre_ping=True)
 
+
 engine = get_engine()
+
 
 def generar_token(user_id: int, correo: str, nombre: str, rol: str) -> str:
     payload = {
@@ -60,11 +63,12 @@ def generar_token(user_id: int, correo: str, nombre: str, rol: str) -> str:
     }
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
+
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         auth = request.headers.get("Authorization", "")
-        if (!auth.startswith("Bearer ")): 
+        if not auth.startswith("Bearer "):
             return jsonify({"error": "Token requerido"}), 401
         try:
             payload = jwt.decode(auth.split(" ")[1], SECRET_KEY, algorithms=["HS256"])
@@ -74,27 +78,33 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated
 
+
 # =====================================================================
 # ENRUTAMIENTO DE INTERFACES WEB (HTML)
 # =====================================================================
 @app.route("/")
 @app.route("/login")
-def html_login_page(): 
+def html_login_page():
     return send_from_directory(DIR_BASE, "login.html")
 
+
 @app.route("/dashboard")
-def html_dashboard_page(): 
+def html_dashboard_page():
     return send_from_directory(DIR_BASE, "dashboard.html")
 
+
 @app.route("/gestion")
-def html_gestion_page(): 
+def html_gestion_page():
     return send_from_directory(DIR_BASE, "gestion.html")
+
 
 @app.route("/logo-ese.png")
 def logoese_page(): return send_from_directory(DIR_BASE, "logo-ese.png")
 
+
 @app.route("/logo-aps.png")
 def logoaps_page(): return send_from_directory(DIR_BASE, "logo-aps.png")
+
 
 # =====================================================================
 # ENDPOINTS DE LA API CORE (JSON)
@@ -105,22 +115,25 @@ def api_login_auth():
     correo = str(body.get("correo", "")).strip().lower()
     password = str(body.get("password", "")).strip()
 
-    if not correo or not password: 
+    if not correo or not password:
         return jsonify({"error": "Credenciales requeridas"}), 400
 
     try:
         with engine.connect() as conn:
-            res = conn.execute(text("SELECT id, username, password_hash FROM usuarios WHERE LOWER(TRIM(username)) = :u LIMIT 1"), {"u": correo})
+            res = conn.execute(
+                text("SELECT id, username, password_hash FROM usuarios WHERE LOWER(TRIM(username)) = :u LIMIT 1"),
+                {"u": correo})
             usuario = res.mappings().first()
-            
+
             if not usuario or not check_password_hash(usuario["password_hash"], password):
                 return jsonify({"error": "Credenciales incorrectas"}), 401
-            
+
             nombre_visual = usuario["username"].capitalize()
             token = generar_token(usuario["id"], usuario["username"], nombre_visual, "Admin")
             return jsonify({"token": token, "nombre": nombre_visual, "rol": "Admin"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/vacunacion/datos", methods=["GET"])
 @require_auth
@@ -128,7 +141,7 @@ def api_get_datos_vacunacion():
     try:
         query = 'SELECT * FROM public."vacunacion_aps_2026"'
         df = pd.read_sql(query, engine)
-        
+
         if df.empty:
             return jsonify({"registros": [], "columnas_db": []})
 
@@ -137,20 +150,21 @@ def api_get_datos_vacunacion():
         df['tipo'] = df[col_tipo] if col_tipo else 'Sin Clasificar'
         df['lat'] = df['lat_1_geopunto'] if 'lat_1_geopunto' in df.columns else None
         df['lng'] = df['long_1_geopunto'] if 'long_1_geopunto' in df.columns else None
-        
+
         columnas_df = list(df.columns)
         df = df.fillna('')
         registros_dict = df.to_dict(orient='records')
-        
+
         datos_json = json.dumps({
             "registros": registros_dict,
             "columnas_db": columnas_df
         }, ensure_ascii=False, default=str)
-        
+
         return Response(datos_json, mimetype='application/json')
     except Exception as e:
         logger.error(f"❌ Error en /api/vacunacion/datos: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/vacunacion/sync", methods=["POST"])
 @require_auth
@@ -163,30 +177,34 @@ def api_sync_vacunacion():
     except Exception as e:
         return jsonify({"status": "error", "logs": log_stream.getvalue() + f"\n❌ ERROR: {str(e)}"})
 
+
 @app.route("/api/vacunacion/exportar", methods=["POST"])
 @require_auth
 def api_exportar_vacunacion():
     body = request.get_json(silent=True) or {}
     f_ini = body.get("fecha_ini", "")
     f_fin = body.get("fecha_fin", "")
-    
+
     log_stream = io.StringIO()
     try:
         motor = ExcelVacunacion(log_stream)
         archivo_io = motor.generar(f_ini, f_fin)
-        
+
         nombre_archivo = f"Reporte_Vacunacion_{int(time.time())}.xlsx"
         ruta_archivo = os.path.join(DIR_BASE, nombre_archivo)
         with open(ruta_archivo, "wb") as f:
             f.write(archivo_io.getbuffer())
-            
-        return jsonify({"status": "success", "logs": log_stream.getvalue(), "download_url": f"/download/{nombre_archivo}"})
+
+        return jsonify(
+            {"status": "success", "logs": log_stream.getvalue(), "download_url": f"/download/{nombre_archivo}"})
     except Exception as e:
         return jsonify({"status": "error", "logs": log_stream.getvalue() + f"\n❌ ERROR: {str(e)}"})
+
 
 @app.route("/download/<filename>")
 def download_file(filename):
     return send_file(os.path.join(DIR_BASE, filename), as_attachment=True)
+
 
 # =====================================================================
 # CLASE LOGICA: PIPELINE ETL (CON PAUSAS Y REINTENTOS ANTI-RATE-LIMIT)
@@ -202,7 +220,7 @@ class ETLVacunacion:
         handler = logging.StreamHandler(log_stream)
         handler.setFormatter(logging.Formatter('%(asctime)s | %(message)s', datefmt='%H:%M:%S'))
         self.logger.handlers = [handler]
-        
+
         self.session = self._configurar_sesion()
         self._autenticar_api()
 
@@ -222,22 +240,24 @@ class ETLVacunacion:
 
     def _ejecutar_upsert_seguro(self, tabla_temporal: str, tabla_final: str, columna_pk: str):
         with engine.begin() as conn:
-            res_dest = conn.execute(text(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{tabla_final}'"))
+            res_dest = conn.execute(text(
+                f"SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{tabla_final}'"))
             cols_destino = {row[0]: row[1] for row in res_dest.fetchall()}
-            
-            res_temp = conn.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{tabla_temporal}'"))
+
+            res_temp = conn.execute(text(
+                f"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '{tabla_temporal}'"))
             cols_temporal = [row[0] for row in res_temp.fetchall()]
-            
+
             columnas_comunes = [c for c in cols_destino if c in cols_temporal]
-            
+
             nombres_insert = []
             nombres_select = []
             updates = []
-            
+
             for col in columnas_comunes:
                 tipo = cols_destino[col].lower()
                 nombres_insert.append(f'"{col}"')
-                
+
                 if 'timestamp' in tipo or 'date' in tipo:
                     expr = f"""
                     (CASE 
@@ -258,10 +278,10 @@ class ETLVacunacion:
                     nombres_select.append(f'CAST(NULLIF("{col}", \'\') AS BIGINT)')
                 else:
                     nombres_select.append(f'CAST("{col}" AS TEXT)')
-                
+
                 if col != columna_pk:
                     updates.append(f'"{col}" = EXCLUDED."{col}"')
-                        
+
             sql_upsert = f"""
                 INSERT INTO public."{tabla_final}" ({", ".join(nombres_insert)})
                 SELECT {", ".join(nombres_select)} FROM public."{tabla_temporal}"
@@ -275,7 +295,7 @@ class ETLVacunacion:
         form_ref = os.getenv("API_FORM_REF_VACUNACION_2026")
         tabla_destino = "vacunacion_aps_2026"
         columna_pk = "ec5_uuid"
-        
+
         pagina = 1
         total_procesados = 0
         tabla_temporal = f"temp_{tabla_destino}"
@@ -295,8 +315,9 @@ class ETLVacunacion:
             # Sub-ciclo robusto de reintentos para lidiar con el limitador 429
             for intento in range(3):
                 try:
-                    respuesta = self.session.get(f"{self.base_url}/export/entries/{self.project_slug}", params=parametros, timeout=45)
-                    
+                    respuesta = self.session.get(f"{self.base_url}/export/entries/{self.project_slug}",
+                                                 params=parametros, timeout=45)
+
                     if respuesta.status_code == 400:
                         self.logger.error("ERROR 400 Detectado (Parámetro no válido).")
                         error_400_detectado = True
@@ -309,7 +330,7 @@ class ETLVacunacion:
                         self.logger.warning("Token vencido intermedio. Refrescando llaves...")
                         self._autenticar_api()
                         continue
-                        
+
                     respuesta.raise_for_status()
                     break
                 except requests.exceptions.RequestException as e:
@@ -326,23 +347,26 @@ class ETLVacunacion:
             df = pd.read_csv(StringIO(resp.text if 'resp' in locals() else respuesta.text), dtype=str)
             df.columns = [str(c).strip().replace(" ", "_").replace("-", "_").lower() for c in df.columns]
             df = df.replace(['nan', 'NaN', 'None', 'null', 'NULL', ''], None)
-            
+
             if columna_pk in df.columns: ids_activos.update(df[columna_pk].dropna().tolist())
             total_procesados += len(df)
-            
+
             with engine.begin() as conn:
                 df.to_sql(tabla_temporal, conn, if_exists='replace', index=False)
-            
+
             self._ejecutar_upsert_seguro(tabla_temporal, tabla_destino, columna_pk)
             pagina += 1
 
         if ids_activos:
             self.logger.info("Saneando registros eliminados en la nube...")
             with engine.begin() as conn:
-                pd.DataFrame({columna_pk: list(ids_activos)}).to_sql("temp_ids_vac", conn, if_exists='replace', index=False)
-                res = conn.execute(text(f'DELETE FROM public."{tabla_destino}" WHERE "{columna_pk}" NOT IN (SELECT "{columna_pk}" FROM temp_ids_vac)'))
+                pd.DataFrame({columna_pk: list(ids_activos)}).to_sql("temp_ids_vac", conn, if_exists='replace',
+                                                                     index=False)
+                res = conn.execute(text(
+                    f'DELETE FROM public."{tabla_destino}" WHERE "{columna_pk}" NOT IN (SELECT "{columna_pk}" FROM temp_ids_vac)'))
                 self.logger.info(f"Se eliminaron {res.rowcount} registros obsoletos.")
         self.logger.info(f"--- Proceso finalizado. Total activos sincronizados: {total_procesados} ---")
+
 
 # =====================================================================
 # CLASE MOTOR: EXPORTACIÓN A EXCEL CON MAPEO JSON ESTRUCTURAL
@@ -355,7 +379,7 @@ class ExcelVacunacion:
         handler.setFormatter(logging.Formatter('%(message)s'))
         self.logger.handlers = [handler]
         self.preguntas_oficiales = {}
-        
+
         self.mapeo_exacto = {
             "ec5_uuid": "ID Ficha Epicollect", "created_at": "Fecha de Creacion (API)",
             "uploaded_at": "Fecha de Sincronizacion", "title": "Titulo del Registro",
@@ -422,10 +446,11 @@ class ExcelVacunacion:
         if df_hoja.empty: return df_hoja
         df_limpio = df_hoja.copy()
         valores_viciosos = ['None', 'nan', 'NaN', 'NULL', 'null']
-        
+
         for col in df_limpio.columns:
             if pd.api.types.is_object_dtype(df_limpio[col]):
-                df_limpio[col] = df_limpio[col].astype(str).str.strip().replace(valores_viciosos, pd.NA).replace(r'^\s*$', pd.NA, regex=True)
+                df_limpio[col] = df_limpio[col].astype(str).str.strip().replace(valores_viciosos, pd.NA).replace(
+                    r'^\s*$', pd.NA, regex=True)
             else:
                 df_limpio[col] = df_limpio[col].replace(valores_viciosos, pd.NA)
 
@@ -438,10 +463,17 @@ class ExcelVacunacion:
     def reportar(self, df, hoja):
         self.logger.info(f"📊 Hoja '{hoja}': {len(df)} registros procesados.")
         if len(df) == 0: return
-        vacs = {'Fiebre Amarilla': ['fiebre amarilla', 'amarilla'], 'Influenza': ['influenza', 'cepa'], 'Hepatitis A': ['hepatitis a'], 'Hepatitis B': ['hepatitis b'], 'VPH': ['vph', 'papiloma'], 'COVID-19': ['covid', 'sars'], 'Neumococo': ['neumococo'], 'Rotavirus': ['rotavirus'], 'Polio': ['polio', 'vop', 'vip'], 'Pentavalente': ['pentavalente', 'penta'], 'Hexavalente': ['hexavalente', 'hexa'], 'DPT': ['dpt'], 'BCG': ['bcg', 'tuberculosis'], 'Triple Viral (SRP)': ['triple viral', 'srp', 'sarampion'], 'Varicela': ['varicela'], 'Toxoide Td': ['toxoide', 'tetano', 'td']}
+        vacs = {'Fiebre Amarilla': ['fiebre amarilla', 'amarilla'], 'Influenza': ['influenza', 'cepa'],
+                'Hepatitis A': ['hepatitis a'], 'Hepatitis B': ['hepatitis b'], 'VPH': ['vph', 'papiloma'],
+                'COVID-19': ['covid', 'sars'], 'Neumococo': ['neumococo'], 'Rotavirus': ['rotavirus'],
+                'Polio': ['polio', 'vop', 'vip'], 'Pentavalente': ['pentavalente', 'penta'],
+                'Hexavalente': ['hexavalente', 'hexa'], 'DPT': ['dpt'], 'BCG': ['bcg', 'tuberculosis'],
+                'Triple Viral (SRP)': ['triple viral', 'srp', 'sarampion'], 'Varicela': ['varicela'],
+                'Toxoide Td': ['toxoide', 'tetano', 'td']}
         c = Counter()
-        cols = [col for col in df.columns if not any(x in str(col).lower() for x in ['motivo', 'no aplic', 'pendient', 'proxima'])]
-        
+        cols = [col for col in df.columns if
+                not any(x in str(col).lower() for x in ['motivo', 'no aplic', 'pendient', 'proxima'])]
+
         for _, row in df[cols].iterrows():
             vp = set()
             for col in cols:
@@ -462,7 +494,7 @@ class ExcelVacunacion:
         self.cargar_json_preguntas()
         self.logger.info("Extrayendo datos de PostgreSQL...")
         df = pd.read_sql('SELECT * FROM public."vacunacion_aps_2026"', engine)
-        
+
         if df.empty: raise Exception("No hay datos en la tabla.")
         if f_ini or f_fin:
             col_f = next((c for c in df.columns if 'created_at' in c.lower()), None)
@@ -472,38 +504,43 @@ class ExcelVacunacion:
                 if f_ini: mask &= (fechas >= pd.to_datetime(f_ini))
                 if f_fin: mask &= (fechas <= pd.to_datetime(f_fin) + pd.Timedelta(days=1, seconds=-1))
                 df = df[mask]
-        
+
         self.logger.info(f"Registros totales filtrados a exportar: {len(df)}")
         if df.empty: raise Exception("No hay registros en el rango de fechas seleccionado.")
 
         for col in df.columns:
             if any(x in col.lower() for x in ['fecha', 'created_at', 'uploaded_at']):
                 df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%d/%m/%Y')
-        
+
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_maestro = self.Tanner_clean_cells(df.copy())
             df_maestro.to_excel(writer, sheet_name='Consolidado General', index=False)
             self.reportar(df_maestro, 'Consolidado General')
-            
+
             col_t = next((c for c in df.columns if "tipo_de_vacunaci" in str(c).lower()), None)
             if col_t:
                 df['__tipo_norm__'] = df[col_t].astype(str).str.strip().str.lower()
-                categorias = [('recién nacidos', 'Recién Nacidos'), ('niños y niñas', 'Niños y Niñas'), ('adultos', 'Adultos')]
-                
+                categorias = [('recién nacidos', 'Recién Nacidos'), ('niños y niñas', 'Niños y Niñas'),
+                              ('adultos', 'Adultos')]
+
                 for val_norm, sheet_name in categorias:
                     df_cat = df[df['__tipo_norm__'] == val_norm].drop(columns=['__tipo_norm__'], errors='ignore')
                     if not df_cat.empty:
                         d = self.Tanner_clean_cells(df_cat)
-                        if d.shape[1] > 0: d.to_excel(writer, sheet_name=sheet_name, index=False); self.reportar(d, sheet_name)
-                
-                df_otros = df[~df['__tipo_norm__'].isin(['recién nacidos', 'niños y niñas', 'adultos'])].drop(columns=['__tipo_norm__'], errors='ignore')
+                        if d.shape[1] > 0: d.to_excel(writer, sheet_name=sheet_name, index=False); self.reportar(d,
+                                                                                                                 sheet_name)
+
+                df_otros = df[~df['__tipo_norm__'].isin(['recién nacidos', 'niños y niñas', 'adultos'])].drop(
+                    columns=['__tipo_norm__'], errors='ignore')
                 if not df_otros.empty:
                     d_otros = self.Tanner_clean_cells(df_otros)
-                    if d_otros.shape[1] > 0: d_otros.to_excel(writer, sheet_name='Sin Clasificar', index=False); self.reportar(d_otros, 'Sin Clasificar')
+                    if d_otros.shape[1] > 0: d_otros.to_excel(writer, sheet_name='Sin Clasificar',
+                                                              index=False); self.reportar(d_otros, 'Sin Clasificar')
         self.logger.info("✅ Archivo Excel estructurado con éxito.")
         output.seek(0)
         return output
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT_VACUNACION", 5002))
