@@ -363,7 +363,7 @@ class ETLVacunacion:
 
 
 # =====================================================================
-# CLASE LOGICA: EXPORTACIÓN VECTORIAL DE ALTO RENDIMIENTO (MILI-SEGUNDOS)
+# CLASE LOGICA: EXPORTACIÓN VECTORIAL ULTRA-RÁPIDA Y A PRUEBA DE FALLOS
 # =====================================================================
 class ExcelVacunacion:
     def __init__(self, log_stream):
@@ -425,8 +425,7 @@ class ExcelVacunacion:
 
     def encontrar_mejor_coincidencia(self, col_db: str) -> str:
         col_db_normalizada = str(col_db).strip().lower()
-        if col_db_normalizada in self.mapeo_exacto:
-            return self.mapeo_exacto[col_db_normalizada]
+        if col_db_normalizada in self.mapeo_exacto: return self.mapeo_exacto[col_db_normalizada]
 
         col_sin_prefijo = re.sub(r'^[\d_]+', '', str(col_db))
         col_busqueda = self._limpiar_texto(col_sin_prefijo)
@@ -443,23 +442,33 @@ class ExcelVacunacion:
     def Tanner_clean_cells(self, df_hoja: pd.DataFrame) -> pd.DataFrame:
         if df_hoja.empty: return df_hoja
         df_limpio = df_hoja.copy()
-        valores_viciosos = ['None', 'nan', 'NaN', 'NULL', 'null']
+        valores_viciosos = ['None', 'nan', 'NaN', 'NULL', 'null', '']
 
         for col in df_limpio.columns:
             if pd.api.types.is_object_dtype(df_limpio[col]):
-                df_limpio[col] = df_limpio[col].astype(str).str.strip().replace(valores_viciosos, pd.NA).replace(
-                    r'^\s*$', pd.NA, regex=True)
+                df_limpio[col] = df_limpio[col].astype(str).str.strip().replace(valores_viciosos, pd.NA)
             else:
                 df_limpio[col] = df_limpio[col].replace(valores_viciosos, pd.NA)
 
         df_limpio = df_limpio.dropna(axis=1, how='all')
         if df_limpio.shape[1] == 0: return df_hoja
 
-        df_limpio.columns = [self.encontrar_mejor_coincidencia(col) for col in df_limpio.columns]
+        # CORRECCIÓN DEFINITIVA DE DUPLICADOS: Renombramiento con contador (1), (2)...
+        nuevos_nombres = []
+        vistos = {}
+        for col in df_limpio.columns:
+            nuevo_nombre = self.encontrar_mejor_coincidencia(col)
+            if nuevo_nombre in vistos:
+                vistos[nuevo_nombre] += 1
+                nuevo_nombre = f"{nuevo_nombre} ({vistos[nuevo_nombre]})"
+            else:
+                vistos[nuevo_nombre] = 0
+            nuevos_nombres.append(nuevo_nombre)
+
+        df_limpio.columns = nuevos_nombres
         return df_limpio
 
     def reportar(self, df, hoja):
-        """Módulo analítico re-diseñado con vectorización nativa completa. Cero loops iterrows()"""
         self.logger.info(f"📊 Hoja '{hoja}': {len(df)} registros procesados.")
         if df.empty: return
 
@@ -478,24 +487,29 @@ class ExcelVacunacion:
             self.logger.info("-" * 40)
             return
 
-        # Clonamos un DataFrame ligero en texto plano y minúsculas para comparaciones instantáneas
         df_str = df[cols].fillna('').astype(str).apply(lambda x: x.str.lower().str.strip())
-        valores_no = ['none', 'nan', 'null', '2. no', 'no', '0', 'false', '']
+        valores_no = {'none', 'nan', 'null', '2. no', 'no', '0', 'false', ''}
+
         celdas_validas = ~df_str.isin(valores_no)
+        df_clean_text = df_str.copy()
+
+        # Como ya garantizamos columnas únicas, este loop es 100% estable
+        for col in df_clean_text.columns:
+            df_clean_text.loc[~celdas_validas[col], col] = ''
+
+        joined_rows = df_clean_text.agg(' '.join, axis=1)
 
         for k, keywords in vacs.items():
             pattern = '|'.join([re.escape(kw) for kw in keywords])
+
             cols_vac = [col for col in cols if any(kw in str(col).lower() for kw in keywords)]
-
-            filas_con_vacuna = pd.Series(False, index=df.index)
+            match_col = pd.Series(False, index=df.index)
             if cols_vac:
-                filas_con_vacuna |= celdas_validas[cols_vac].any(axis=1)
+                match_col = celdas_validas[cols_vac].any(axis=1)
 
-            # Escaneo matricial de texto unificado en una sola pasada de alta velocidad
-            match_pattern = df_str.apply(lambda s: s.str.contains(pattern, regex=True)).any(axis=1)
-            filas_con_vacuna |= (match_pattern & celdas_validas.any(axis=1))
+            match_text = joined_rows.str.contains(pattern, regex=True)
 
-            total_p = filas_con_vacuna.sum()
+            total_p = (match_col | match_text).sum()
             if total_p > 0:
                 c[k] = total_p
 
