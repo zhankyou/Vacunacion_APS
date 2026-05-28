@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PAI 2026 — Gestión de Datos y Sincronización</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --primary: #0B3D2C;
+      --primary-lt: #1A5C43;
+      --accent: #00C878;
+      --accent-dim: rgba(0,200,120,0.12);
+      --fever: #F59E0B;
+      --fever-dim: rgba(245,158,11,0.12);
+      --fever-dark: #B45309;
+      --surface: #F3F7F5;
+      --card: #FFFFFF;
+      --border: #DDE8E2;
+      --text: #0F1F16;
+      --muted: #5C7268;
+      --sidebar: 256px;
+      --topbar: 60px;
+      --radius: 14px;
+      --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+      --term-bg: #0d1117;
+      --term-text: #00ff41;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{font-family:'DM Sans',sans-serif;background:var(--surface);color:var(--text);overflow-x:hidden;line-height:1.6}
+
+    /* ── SIDEBAR (IDÉNTICA A DASHBOARD) ── */
+    .sidebar{
+      width:var(--sidebar);position:fixed;top:0;left:0;height:100vh;
+      background:var(--primary);display:flex;flex-direction:column;
+      z-index:200;overflow-y:auto;
+    }
+    .sb-header{padding:22px 18px 18px;border-bottom:1px solid rgba(255,255,255,.1)}
+    .sb-logo{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+    .sb-icon{width:38px;height:38px;background:var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+    .sb-title{font-family:'Syne',sans-serif;font-weight:800;font-size:17px;color:#fff;line-height:1.2}
+    .sb-sub{font-size:10px;color:rgba(255,255,255,.45);letter-spacing:.5px;text-transform:uppercase}
+    .sb-date{font-family:'DM Mono',monospace;font-size:11px;color:rgba(255,255,255,.35);margin-top:6px}
+    .sb-nav{padding:14px 10px;flex:1}
+    .nav-section{font-size:9.5px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.3);padding:10px 10px 4px}
+    .nav-item{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:var(--radius-sm);color:rgba(255,255,255,.65);text-decoration:none;font-size:13px;font-weight:500;transition:all .18s;cursor:pointer;border:none;background:none;width:100%;text-align:left}
+    .nav-item:hover{background:rgba(255,255,255,.08);color:#fff}
+    .nav-item.active{background:var(--accent-dim);color:var(--accent)}
+    .nav-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0;opacity:.6}
+
+    .sidebar-user{padding:1rem 1.4rem;border-top:1px solid rgba(255,255,255,.08);margin-top:auto;}
+    .btn-logout-sidebar{width:100%;background:rgba(229,57,53,.15);border:1px solid rgba(229,57,53,.3);color:#ff8a80;border-radius:8px;padding:.55rem;font-family:'Syne',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;transition:background .2s;display:flex;align-items:center;justify-content:center;gap:6px;}
+    .btn-logout-sidebar:hover{background:rgba(229,57,53,.25);}
+
+    /* ── TOPBAR (IDÉNTICA A DASHBOARD) ── */
+    .topbar{position:sticky;top:0;z-index:150;background:var(--primary);height:var(--topbar);padding:0 26px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow);}
+    .topbar-brand{font-family:'Syne',sans-serif;font-weight:800;font-size:16px;color:#fff;display:flex;align-items:center;gap:8px}
+    .topbar-actions { display: flex; gap: 10px; align-items: center; }
+    .btn-print {
+      display: inline-flex; align-items: center; gap: .5rem; background: var(--accent);
+      color: var(--primary); border: none; padding: .4rem 1.1rem; border-radius: 8px;
+      font-family: 'Syne', sans-serif; font-size: .85rem; font-weight: 700;
+      cursor: pointer; transition: opacity .2s, transform .1s; box-shadow: 0 2px 10px rgba(0,0,0,.2); height: 38px;
+    }
+    .btn-print:hover { opacity: .9; transform: translateY(-1px); }
+
+    /* ── MAIN & CONTENT LAYOUT ── */
+    .main{margin-left:var(--sidebar);min-height:100vh;display:flex;flex-direction:column;background:var(--surface);}
+    .content{padding:26px 26px 52px;flex:1;display:flex;flex-direction:column;gap:24px;}
+
+    /* PAGE HEADER */
+    .page-hd{margin-bottom:4px}
+    .page-title{font-family:'Syne',sans-serif;font-weight:800;font-size:24px;color:var(--text);line-height:1.2}
+    .page-title em{color:var(--accent);font-style:normal}
+
+    /* CARDS STRUCTURE */
+    .grid-actions { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+    .block{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;position:relative;box-shadow:var(--shadow);padding:22px;display:flex;flex-direction:column;}
+    .block::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:var(--accent)}
+    .block h2 { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; color:var(--text); margin-bottom:8px; display:flex; align-items:center; gap:8px;}
+    .block p { font-size:.85rem; color:var(--muted); margin-bottom:20px; line-height:1.5; }
+
+    /* INPUTS */
+    .input-group { margin-bottom:12px; }
+    .input-group label { display:block; font-size:.7rem; font-weight:700; color:var(--muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:.5px;}
+    .input-group input { width:100%; padding:11px 14px; border:1.5px solid var(--border); border-radius:8px; font-family:'DM Sans',sans-serif; font-size:0.85rem; outline:none; background:#fff; transition:border-color .2s; }
+    .input-group input:focus { border-color:var(--accent); }
+
+    .btn-action { width:100%; padding:13px; background:var(--primary); color:#fff; border:none; border-radius:8px; font-family:'Syne',sans-serif; font-weight:700; font-size:13px; cursor:pointer; transition:.2s; display:flex; justify-content:center; align-items:center; gap:8px; margin-top:auto;}
+    .btn-action:hover { background:var(--primary-lt); transform:translateY(-1px); }
+    .btn-action:disabled { background:var(--border); color:var(--muted); cursor:not-allowed; transform:none; }
+
+    /* CONSOLA VIRTUAL EPIDEMIOLÓGICA */
+    .console-wrapper { background:var(--term-bg); border-radius:var(--radius); padding:20px; box-shadow:inset 0 4px 20px rgba(0,0,0,.4); display:flex; flex-direction:column; min-height:280px; flex:1; }
+    .console-header { display:flex; justify-content:space-between; color:#8b949e; font-size:.72rem; margin-bottom:12px; font-family:'DM  Mono', monospace; border-bottom:1px solid #30363d; padding-bottom:10px; letter-spacing:.5px;}
+    .console-output { font-family:'DM Mono', monospace; font-size:.8rem; color:var(--term-text); line-height:1.6; white-space:pre-wrap; overflow-y:auto; flex:1; max-height:380px; padding-right:5px;}
+    .console-output .log-err { color: #ff7b72; font-weight: bold; }
+    .console-output .log-warn { color: #d2a8ff; }
+
+    .console-output::-webkit-scrollbar { width:5px; }
+    .console-output::-webkit-scrollbar-track { background:transparent; }
+    .console-output::-webkit-scrollbar-thumb { background:#30363d; border-radius:10px; }
+
+    /* PROGRESS BAR */
+    .loader-bar { height:4px; background:#30363d; border-radius:2px; margin-bottom:12px; overflow:hidden; display:none; }
+    .loader-fill { height:100%; width:30%; background:var(--accent); animation: slide 1.5s infinite linear; border-radius:2px;}
+    @keyframes slide { 0% { transform:translateX(-100%); } 100% { transform:translateX(350%); } }
+
+    /* FOOTER */
+    .footer{padding:18px 26px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);background:var(--card);flex-wrap:wrap;gap:8px;margin-top:auto;}
+  </style>
+</head>
+<body>
+
+<aside class="sidebar" id="sidebar">
+  <div class="sb-header">
+    <div class="sb-logo">
+      <div class="sb-icon">💉</div>
+      <div>
+        <div class="sb-title">PAI 2026</div>
+        <div class="sb-sub">Vacunación Regular · APS</div>
+      </div>
+    </div>
+    <div class="sb-date" id="sbDate">Actualizado: —</div>
+  </div>
+
+  <nav class="sb-nav">
+    <div class="nav-section">Menú Principal</div>
+    <a href="/dashboard" class="nav-item"><span class="nav-dot"></span> Dashboard PAI</a>
+    <a href="/gestion" class="nav-item active"><span class="nav-dot"></span> Sincronización ETL</a>
+  </nav>
+
+  <div class="sidebar-user">
+    <button class="btn-logout-sidebar" onclick="logout()">🚪 Cerrar Sesión</button>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-brand"><span>⚙️</span> Panel de Control Técnico</div>
+    <div class="topbar-actions">
+      <button class="btn-print" style="background:var(--primary); color:white; border:1px solid rgba(255,255,255,0.2);" onclick="window.location.href='/dashboard'">📋 Regresar al Dashboard</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="page-hd">
+      <h1 class="page-title">Administración y <em>Flujo de Datos</em></h1>
+    </div>
+
+    <div class="grid-actions">
+      <div class="block">
+        <h2>🔄 Sincronización EpiCollect5 Nube</h2>
+        <p>Establece un puente seguro mediante OAuth2 con Epicollect, extrae los bloques nuevos, ejecuta un mapeo de tipos y actualiza la tabla unificada en la nube.</p>
+        <button class="btn-action" id="btnSync" onclick="runSync()">Iniciar Extracción ETL</button>
+      </div>
+
+      <div class="block">
+        <h2>📥 Estructurar Reporte Epidemiológico (Excel)</h2>
+        <p>Compila un archivo estructurado con corrección semántica por SequenceMatcher. Filtra de forma aislada por rango o descarga el consolidado histórico.</p>
+        <div style="display:flex; gap:10px; width:100%;">
+          <div class="input-group" style="flex:1;">
+            <label>Fecha de Inicio</label>
+            <input type="date" id="excelIni">
+          </div>
+          <div class="input-group" style="flex:1;">
+            <label>Fecha de Cierre</label>
+            <input type="date" id="excelFin">
+          </div>
+        </div>
+        <button class="btn-action" style="background:var(--accent); color:var(--primary);" id="btnExcel" onclick="runExcel()">Generar Libro de Trabajo</button>
+      </div>
+    </div>
+
+    <div class="console-wrapper">
+      <div class="console-header">
+        <span>SERVER TERMINAL // SYSTEM LOG FLOW</span>
+        <span id="termStatus">IDLE</span>
+      </div>
+      <div class="loader-bar" id="loaderBar"><div class="loader-fill"></div></div>
+      <div class="console-output" id="consoleOutput">Esperando directivas de ejecución por el auditor...</div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <span>PAI 2026 · Vacunación Regular APS · Secretaría de Salud del Meta</span>
+    <span style="font-family:'DM Mono',monospace" id="footerDate">Última actualización: —</span>
+  </footer>
+</main>
+
+<script>
+  const API_BASE = window.location.protocol === 'file:' ? 'http://127.0.0.1:5002' : window.location.origin;
+  const token = localStorage.getItem('informes_token');
+  if (!token) window.location.href = '/login';
+
+  const consoleOut = document.getElementById('consoleOutput');
+  const loaderBar = document.getElementById('loaderBar');
+  const statusTxt = document.getElementById('termStatus');
+
+  function logout() {
+      localStorage.removeItem('informes_token');
+      localStorage.removeItem('informes_user');
+      window.location.href = '/login';
+  }
+
+  function logToConsole(text) {
+      let formatted = text.replace(/❌/g, '<span class="log-err">❌</span>')
+                          .replace(/⚠️/g, '<span class="log-warn">⚠️</span>')
+                          .replace(/✅/g, '<span style="color:var(--accent)">✅</span>');
+      consoleOut.innerHTML += `\n${formatted}`;
+      consoleOut.scrollTop = consoleOut.scrollHeight;
+  }
+
+  function setBusy(isBusy, processName) {
+      document.getElementById('btnSync').disabled = isBusy;
+      document.getElementById('btnExcel').disabled = isBusy;
+      loaderBar.style.display = isBusy ? 'block' : 'none';
+      statusTxt.textContent = isBusy ? `EJECUTANDO: ${processName}...` : 'IDLE';
+      if(isBusy) {
+          consoleOut.innerHTML = `> Estableciendo conexión remota para [${processName}]...\n`;
+      }
+  }
+
+  async function runSync() {
+      setBusy(true, "ETL SYNC");
+      try {
+          const res = await fetch(`${API_BASE}/api/vacunacion/sync`, {
+              method: 'POST', headers: { 'Authorization': 'Bearer ' + token }
+          });
+          if(res.status === 401) { window.location.href = '/login'; return; }
+          const data = await res.json();
+          logToConsole(data.logs || 'Sin respuesta del stream.');
+          if(data.status === 'success') logToConsole("\n> [PROCESO COMPLETADO EXITOSAMENTE]");
+      } catch (err) {
+          logToConsole(`\n❌ Error en el puente de red: ${err.message}`);
+      }
+      setBusy(false);
+  }
+
+  async function runExcel() {
+      const fIni = document.getElementById('excelIni').value;
+      const fFin = document.getElementById('excelFin').value;
+
+      setBusy(true, "EXCEL EXPORT");
+      try {
+          const res = await fetch(`${API_BASE}/api/vacunacion/exportar`, {
+              method: 'POST',
+              headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fecha_ini: fIni, fecha_fin: fFin })
+          });
+          if(res.status === 401) { window.location.href = '/login'; return; }
+          const data = await res.json();
+
+          logToConsole(data.logs || 'Generando estructuras...');
+
+          if(data.status === 'success' && data.download_url) {
+              logToConsole(`\n✅ Descarga autorizada por la API.`);
+              window.location.href = API_BASE + data.download_url;
+          }
+      } catch (err) {
+          logToConsole(`\n❌ Error en el flujo del reporte: ${err.message}`);
+      }
+      setBusy(false);
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+      const hoy = new Date().toISOString().split('T')[0];
+      const format = { day: '2-digit', month: 'short', year: 'numeric' };
+      const txt = new Date().toLocaleDateString('es-CO', format);
+      document.getElementById('sbDate').textContent = 'Actualizado: ' + txt;
+      document.getElementById('footerDate').textContent = 'Última actualización: ' + txt;
+  });
+</script>
+</body>
+</html>
