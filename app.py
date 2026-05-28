@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Sistema Integral de Vacunación PAI 2026
-Incluye: Dashboard Web, Sincronización ETL Segura y Exportación a Excel Avanzada.
+Incluye: Dashboard Web, Sincronización ETL Segura y Exportación a Excel de Alto Rendimiento.
 """
 
 import os
@@ -76,6 +76,7 @@ def require_auth(f):
         except:
             return jsonify({"error": "Token inválido o expirado"}), 401
         return f(*args, **kwargs)
+
     return decorated
 
 
@@ -207,7 +208,7 @@ def download_file(filename):
 
 
 # =====================================================================
-# CLASE LOGICA: PIPELINE ETL (CON PAUSAS Y REINTENTOS ANTI-RATE-LIMIT)
+# CLASE LOGICA: PIPELINE ETL (EXTRACCIÓN Y TRADUCCIÓN DE FECHAS)
 # =====================================================================
 class ETLVacunacion:
     def __init__(self, log_stream):
@@ -303,7 +304,6 @@ class ETLVacunacion:
         parametros = {'form_ref': form_ref, 'format': 'csv', 'per_page': 500}
 
         while True:
-            # Pausa obligatoria para evitar bloqueos del cortafuegos de EpiCollect
             if pagina > 1:
                 time.sleep(random.uniform(2.0, 4.5))
 
@@ -312,14 +312,13 @@ class ETLVacunacion:
             respuesta = None
             error_400_detectado = False
 
-            # Sub-ciclo robusto de reintentos para lidiar con el limitador 429
             for intento in range(3):
                 try:
                     respuesta = self.session.get(f"{self.base_url}/export/entries/{self.project_slug}",
                                                  params=parametros, timeout=45)
 
                     if respuesta.status_code == 400:
-                        self.logger.error("ERROR 400 Detectado (Parámetro no válido).")
+                        self.logger.error("ERROR 400 Detectado.")
                         error_400_detectado = True
                         break
                     if respuesta.status_code == 429:
@@ -327,24 +326,19 @@ class ETLVacunacion:
                         time.sleep(20)
                         continue
                     if respuesta.status_code == 401:
-                        self.logger.warning("Token vencido intermedio. Refrescando llaves...")
                         self._autenticar_api()
                         continue
 
                     respuesta.raise_for_status()
                     break
                 except requests.exceptions.RequestException as e:
-                    if intento == 2:
-                        self.logger.error(f"❌ Error crítico en página {pagina}: {e}")
-                        break
+                    if intento == 2: break
                     time.sleep(5)
 
-            if error_400_detectado or not respuesta or respuesta.status_code != 200:
-                break
-            if len(respuesta.text.splitlines()) <= 1:
-                break
+            if error_400_detectado or not respuesta or respuesta.status_code != 200: break
+            if len(respuesta.text.splitlines()) <= 1: break
 
-            df = pd.read_csv(StringIO(resp.text if 'resp' in locals() else respuesta.text), dtype=str)
+            df = pd.read_csv(StringIO(respuesta.text), dtype=str)
             df.columns = [str(c).strip().replace(" ", "_").replace("-", "_").lower() for c in df.columns]
             df = df.replace(['nan', 'NaN', 'None', 'null', 'NULL', ''], None)
 
@@ -369,7 +363,7 @@ class ETLVacunacion:
 
 
 # =====================================================================
-# CLASE MOTOR: EXPORTACIÓN A EXCEL CON MAPEO JSON ESTRUCTURAL
+# CLASE LOGICA: EXPORTACIÓN OPTIMIZADA CON MAPA EN MEMORIA INDEXADA
 # =====================================================================
 class ExcelVacunacion:
     def __init__(self, log_stream):
@@ -378,8 +372,9 @@ class ExcelVacunacion:
         handler = logging.StreamHandler(log_stream)
         handler.setFormatter(logging.Formatter('%(message)s'))
         self.logger.handlers = [handler]
-        self.preguntas_oficiales = {}
 
+        # Diccionario directo en memoria O(1) de alta velocidad
+        self.mapeo_automatico = {}
         self.mapeo_exacto = {
             "ec5_uuid": "ID Ficha Epicollect", "created_at": "Fecha de Creacion (API)",
             "uploaded_at": "Fecha de Sincronizacion", "title": "Titulo del Registro",
@@ -390,6 +385,10 @@ class ExcelVacunacion:
             "60_primer_apellido_d": "PRIMER APELLIDO DEL NIÑO", "61_segundo_apellido_": "SEGUNDO APELLIDO DEL NIÑO",
             "62_primer_nombre_del": "PRIMER NOMBRE DEL NIÑO", "63_segundo_nombre_de": "SEGUNDO NOMBRE DEL NIÑO"
         }
+
+    def _limpiar_texto(self, texto: str) -> str:
+        texto = str(texto).lower().replace('_', ' ')
+        return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
 
     def cargar_json_preguntas(self):
         posibles_rutas = [
@@ -402,7 +401,7 @@ class ExcelVacunacion:
             if os.path.exists(r): ruta_json = r; break
 
         if not ruta_json:
-            self.logger.info("⚠️ No se encontró 'formulario_vacunacion.json'. Se omitirá traducción de títulos.")
+            self.logger.info("⚠️ Archivo 'formulario_vacunacion.json' omitido. Usando nombres nativos.")
             return
 
         try:
@@ -414,33 +413,36 @@ class ExcelVacunacion:
                 for el in elementos:
                     q_sucia = el.get('question', '').strip()
                     q_limpia = re.sub(r'<[^>]+>', '', q_sucia).strip()
-                    if q_limpia: self.preguntas_oficiales[q_limpia] = q_limpia
+                    if q_limpia:
+                        # Indexamos en memoria asociando la clave limpia para búsquedas instantáneas
+                        clave_limpia = self._limpiar_texto(q_limpia)
+                        self.mapeo_automatico[clave_limpia] = q_limpia
                     if 'group' in el and isinstance(el['group'], list):
                         extraer_preguntas(el['group'])
 
             extraer_preguntas(inputs)
             self.logger.info("✅ Mapeador estructural JSON cargado con éxito.")
         except Exception as e:
-            self.logger.info(f"⚠️ Error procesando el JSON de preguntas: {e}")
-
-    def _limpiar_texto(self, texto: str) -> str:
-        texto = str(texto).lower().replace('_', ' ')
-        return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
+            self.logger.info(f"⚠️ Error cargando JSON de preguntas: {e}")
 
     def encontrar_mejor_coincidencia(self, col_db: str) -> str:
         col_db_normalizada = str(col_db).strip().lower()
-        if col_db_normalizada in self.mapeo_exacto: return self.mapeo_exacto[col_db_normalizada]
+        if col_db_normalizada in self.mapeo_exacto:
+            return self.mapeo_exacto[col_db_normalizada]
 
         col_sin_prefijo = re.sub(r'^[\d_]+', '', str(col_db))
         col_busqueda = self._limpiar_texto(col_sin_prefijo)
-        mejor_pregunta, mejor_ratio = str(col_db), 0.0
 
-        for preg_original in self.preguntas_oficiales.keys():
-            preg_comparacion = self._limpiar_texto(preg_original)
-            ratio = SequenceMatcher(None, col_busqueda, preg_comparacion[:len(col_busqueda)]).ratio()
-            if ratio > mejor_ratio: mejor_ratio = ratio; mejor_pregunta = preg_original
+        # OPTIMIZACIÓN CRÍTICA: Búsqueda indexada instantánea en O(1)
+        if col_busqueda in self.mapeo_automatico:
+            return self.mapeo_automatico[col_busqueda]
 
-        return mejor_pregunta if mejor_ratio > 0.75 else col_sin_prefijo.replace('_', ' ').title()
+        # Coincidencia por sub-cadena parcial ultra ligera (Reemplaza a SequenceMatcher)
+        for cleaned_preg, orig_preg in self.mapeo_automatico.items():
+            if col_busqueda in cleaned_preg or cleaned_preg in col_busqueda:
+                return orig_preg
+
+        return col_sin_prefijo.replace('_', ' ').title()
 
     def Tanner_clean_cells(self, df_hoja: pd.DataFrame) -> pd.DataFrame:
         if df_hoja.empty: return df_hoja
