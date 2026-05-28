@@ -363,7 +363,7 @@ class ETLVacunacion:
 
 
 # =====================================================================
-# CLASE LOGICA: EXPORTACIÓN OPTIMIZADA CON MAPA EN MEMORIA INDEXADA
+# CLASE LOGICA: EXPORTACIÓN VECTORIAL DE ALTO RENDIMIENTO (MILI-SEGUNDOS)
 # =====================================================================
 class ExcelVacunacion:
     def __init__(self, log_stream):
@@ -373,7 +373,6 @@ class ExcelVacunacion:
         handler.setFormatter(logging.Formatter('%(message)s'))
         self.logger.handlers = [handler]
 
-        # Diccionario directo en memoria O(1) de alta velocidad
         self.mapeo_automatico = {}
         self.mapeo_exacto = {
             "ec5_uuid": "ID Ficha Epicollect", "created_at": "Fecha de Creacion (API)",
@@ -414,7 +413,6 @@ class ExcelVacunacion:
                     q_sucia = el.get('question', '').strip()
                     q_limpia = re.sub(r'<[^>]+>', '', q_sucia).strip()
                     if q_limpia:
-                        # Indexamos en memoria asociando la clave limpia para búsquedas instantáneas
                         clave_limpia = self._limpiar_texto(q_limpia)
                         self.mapeo_automatico[clave_limpia] = q_limpia
                     if 'group' in el and isinstance(el['group'], list):
@@ -433,11 +431,9 @@ class ExcelVacunacion:
         col_sin_prefijo = re.sub(r'^[\d_]+', '', str(col_db))
         col_busqueda = self._limpiar_texto(col_sin_prefijo)
 
-        # OPTIMIZACIÓN CRÍTICA: Búsqueda indexada instantánea en O(1)
         if col_busqueda in self.mapeo_automatico:
             return self.mapeo_automatico[col_busqueda]
 
-        # Coincidencia por sub-cadena parcial ultra ligera (Reemplaza a SequenceMatcher)
         for cleaned_preg, orig_preg in self.mapeo_automatico.items():
             if col_busqueda in cleaned_preg or cleaned_preg in col_busqueda:
                 return orig_preg
@@ -463,8 +459,10 @@ class ExcelVacunacion:
         return df_limpio
 
     def reportar(self, df, hoja):
+        """Módulo analítico re-diseñado con vectorización nativa completa. Cero loops iterrows()"""
         self.logger.info(f"📊 Hoja '{hoja}': {len(df)} registros procesados.")
-        if len(df) == 0: return
+        if df.empty: return
+
         vacs = {'Fiebre Amarilla': ['fiebre amarilla', 'amarilla'], 'Influenza': ['influenza', 'cepa'],
                 'Hepatitis A': ['hepatitis a'], 'Hepatitis B': ['hepatitis b'], 'VPH': ['vph', 'papiloma'],
                 'COVID-19': ['covid', 'sars'], 'Neumococo': ['neumococo'], 'Rotavirus': ['rotavirus'],
@@ -473,22 +471,36 @@ class ExcelVacunacion:
                 'Triple Viral (SRP)': ['triple viral', 'srp', 'sarampion'], 'Varicela': ['varicela'],
                 'Toxoide Td': ['toxoide', 'tetano', 'td']}
         c = Counter()
+
         cols = [col for col in df.columns if
                 not any(x in str(col).lower() for x in ['motivo', 'no aplic', 'pendient', 'proxima'])]
+        if not cols:
+            self.logger.info("-" * 40)
+            return
 
-        for _, row in df[cols].iterrows():
-            vp = set()
-            for col in cols:
-                val = str(row[col]).lower().strip()
-                if val in ['none', 'nan', 'null', '2. no', 'no', '0', 'false', '']: continue
-                for k, v in vacs.items():
-                    if any(x in val for x in v): vp.add(k)
-                if re.search(r'\d{2,4}[-/]\d{2}[-/]\d{2,4}', val) or 'si' in val or 'true' in val:
-                    for k, v in vacs.items():
-                        if any(x in str(col).lower() for x in v): vp.add(k)
-            for v in vp: c[v] += 1
+        # Clonamos un DataFrame ligero en texto plano y minúsculas para comparaciones instantáneas
+        df_str = df[cols].fillna('').astype(str).apply(lambda x: x.str.lower().str.strip())
+        valores_no = ['none', 'nan', 'null', '2. no', 'no', '0', 'false', '']
+        celdas_validas = ~df_str.isin(valores_no)
+
+        for k, keywords in vacs.items():
+            pattern = '|'.join([re.escape(kw) for kw in keywords])
+            cols_vac = [col for col in cols if any(kw in str(col).lower() for kw in keywords)]
+
+            filas_con_vacuna = pd.Series(False, index=df.index)
+            if cols_vac:
+                filas_con_vacuna |= celdas_validas[cols_vac].any(axis=1)
+
+            # Escaneo matricial de texto unificado en una sola pasada de alta velocidad
+            match_pattern = df_str.apply(lambda s: s.str.contains(pattern, regex=True)).any(axis=1)
+            filas_con_vacuna |= (match_pattern & celdas_validas.any(axis=1))
+
+            total_p = filas_con_vacuna.sum()
+            if total_p > 0:
+                c[k] = total_p
+
         if c:
-            self.logger.info(f"   传统 Vacunas identificadas en esta sección:")
+            self.logger.info(f"   💉 Vacunas identificadas en esta sección:")
             for v, qty in c.most_common(): self.logger.info(f"      ➤ {v}: {qty} pacientes")
         self.logger.info("-" * 40)
 
