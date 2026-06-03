@@ -146,6 +146,17 @@ def api_get_datos_vacunacion():
         if df.empty:
             return jsonify({"registros": [], "columnas_db": []})
 
+        # =================================================================
+        # REGLA DE TRANSFORMACIÓN DASHBOARD: CAJACOPI -> PROTEGER
+        # =================================================================
+        col_22 = next((c for c in df.columns if '22_aseguradora' in c.lower()), None)
+        col_133 = next((c for c in df.columns if '133_aseguradora' in c.lower()), None)
+
+        for col in [col_22, col_133]:
+            if col:
+                df[col] = df[col].replace(to_replace=r'(?i)CAJACOPI', value='PROTEGER', regex=True)
+        # =================================================================
+
         col_tipo = next((c for c in df.columns if "tipo_de_vacunaci" in c.lower()), None)
         df['fecha_filtro'] = df['created_at'].astype(str).str.slice(0, 10) if 'created_at' in df.columns else ''
         df['tipo'] = df[col_tipo] if col_tipo else 'Sin Clasificar'
@@ -535,6 +546,12 @@ class ExcelVacunacion:
 
         self.logger.info(f"Registros totales filtrados a exportar: {len(df)}")
         if df.empty: raise Exception("No hay registros en el rango de fechas seleccionado.")
+
+        # =================================================================
+        # REGLA DE TRANSFORMACIÓN GLOBAL PARA EXCEL: CAJACOPI -> PROTEGER
+        # =================================================================
+        df = df.replace(to_replace=r'(?i)CAJACOPI', value='PROTEGER', regex=True)
+        # =================================================================
 
         for col in df.columns:
             if any(x in col.lower() for x in ['fecha', 'created_at', 'uploaded_at']):
