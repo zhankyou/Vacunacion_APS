@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Sistema Integral de Vacunación PAI 2026
-Incluye: Dashboard Web, Sincronización ETL Segura, Exportación a Excel de Alto Rendimiento
-y Sistema de Caché en Memoria para optimización en Render.
+Incluye: Dashboard Web, Sincronización ETL Segura, Exportación a Excel de Alto Rendimiento,
+Sistema de Caché en Memoria y Optimización Extrema de RAM (OOM Protection) para Render.
 """
 
 import os
@@ -13,6 +13,7 @@ import time
 import random
 import re
 import unicodedata
+import gc  # Recolector de basura para liberar RAM manual y agresivamente
 from collections import Counter
 from difflib import SequenceMatcher
 from io import StringIO, BytesIO
@@ -146,7 +147,7 @@ def api_get_datos_vacunacion():
         return Response(CACHE_DASHBOARD["payload"], mimetype='application/json')
 
     try:
-        logger.info("⏳ Consultando Base de Datos PostgreSQL y procesando con Pandas...")
+        logger.info("⏳ Consultando BD (Ejecutando con Optimización de Memoria RAM)...")
         query = 'SELECT * FROM public."vacunacion_aps_2026"'
         df = pd.read_sql(query, engine)
 
@@ -170,19 +171,28 @@ def api_get_datos_vacunacion():
         df['lat'] = df['lat_1_geopunto'] if 'lat_1_geopunto' in df.columns else None
         df['lng'] = df['long_1_geopunto'] if 'long_1_geopunto' in df.columns else None
 
+        # Rellenar nulos sin crear copias extra (ahorra RAM)
+        df.fillna('', inplace=True)
         columnas_df = list(df.columns)
-        df = df.fillna('')
-        registros_dict = df.to_dict(orient='records')
 
-        datos_json = json.dumps({
-            "registros": registros_dict,
-            "columnas_db": columnas_df
-        }, ensure_ascii=False, default=str)
+        # =================================================================
+        # 🛡️ BYPASS DE MEMORIA: EVITAMOS CREAR DICCIONARIOS PESADOS EN PYTHON
+        # =================================================================
+        # 1. Usamos to_json de Pandas (Motor C) para convertir directamente a string
+        registros_json = df.to_json(orient='records', force_ascii=False)
+        columnas_json = json.dumps(columnas_df, ensure_ascii=False)
+        
+        # 2. DESTRUIMOS el DataFrame gigante para liberar RAM antes de unir los strings
+        del df
+        gc.collect()
 
-        # 2. GUARDAR EN CACHÉ
+        # 3. Concatenamos los strings de forma cruda para el payload final
+        datos_json = f'{{"columnas_db": {columnas_json}, "registros": {registros_json}}}'
+
+        # 4. GUARDAR EN CACHÉ
         CACHE_DASHBOARD["payload"] = datos_json
         CACHE_DASHBOARD["timestamp"] = time.time()
-        logger.info("✅ Caché actualizado exitosamente tras consulta a BD.")
+        logger.info("✅ Caché actualizado y RAM liberada exitosamente tras consulta a BD.")
 
         return Response(datos_json, mimetype='application/json')
     except Exception as e:
