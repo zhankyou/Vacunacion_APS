@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Sistema Integral de Vacunación PAI 2026
-Incluye: Dashboard Web, Sincronización ETL Segura y Exportación a Excel de Alto Rendimiento.
+Incluye: Dashboard Web, Sincronización ETL Segura, Exportación a Excel de Alto Rendimiento
+y Sistema de Caché en Memoria para optimización en Render.
 """
 
 import os
@@ -39,6 +40,14 @@ logger = logging.getLogger("VACUNACION_API")
 app = Flask(__name__, static_folder=DIR_BASE)
 CORS(app)
 
+# =====================================================================
+# SISTEMA DE CACHÉ EN MEMORIA PARA OPTIMIZAR RENDER (EVITAR TIMEOUTS)
+# =====================================================================
+CACHE_DASHBOARD = {
+    "payload": None,
+    "timestamp": 0
+}
+CACHE_TTL = 3600  # Tiempo de vida del caché en segundos (1 hora)
 
 # =====================================================================
 # CONEXIÓN A BASE DE DATOS Y CONFIGURACIÓN DE SEGURIDAD
@@ -52,9 +61,7 @@ def get_engine():
     cadena = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?sslmode=require"
     return create_engine(cadena, pool_pre_ping=True)
 
-
 engine = get_engine()
-
 
 def generar_token(user_id: int, correo: str, nombre: str, rol: str) -> str:
     payload = {
@@ -62,7 +69,6 @@ def generar_token(user_id: int, correo: str, nombre: str, rol: str) -> str:
         "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=8)
     }
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-
 
 def require_auth(f):
     @wraps(f)
@@ -76,9 +82,7 @@ def require_auth(f):
         except:
             return jsonify({"error": "Token inválido o expirado"}), 401
         return f(*args, **kwargs)
-
     return decorated
-
 
 # =====================================================================
 # ENRUTAMIENTO DE INTERFACES WEB (HTML)
@@ -88,24 +92,19 @@ def require_auth(f):
 def html_login_page():
     return send_from_directory(DIR_BASE, "login.html")
 
-
 @app.route("/dashboard")
 def html_dashboard_page():
     return send_from_directory(DIR_BASE, "dashboard.html")
-
 
 @app.route("/gestion")
 def html_gestion_page():
     return send_from_directory(DIR_BASE, "gestion.html")
 
-
 @app.route("/logo-ese.png")
 def logoese_page(): return send_from_directory(DIR_BASE, "logo-ese.png")
 
-
 @app.route("/logo-aps.png")
 def logoaps_page(): return send_from_directory(DIR_BASE, "logo-aps.png")
-
 
 # =====================================================================
 # ENDPOINTS DE LA API CORE (JSON)
@@ -139,7 +138,15 @@ def api_login_auth():
 @app.route("/api/vacunacion/datos", methods=["GET"])
 @require_auth
 def api_get_datos_vacunacion():
+    global CACHE_DASHBOARD
+    
+    # 1. VERIFICAR CACHÉ: Evita timeout en Render devolviendo datos en milisegundos
+    if CACHE_DASHBOARD["payload"] and (time.time() - CACHE_DASHBOARD["timestamp"] < CACHE_TTL):
+        logger.info("⚡ Sirviendo datos desde el caché en memoria (Ultra rápido).")
+        return Response(CACHE_DASHBOARD["payload"], mimetype='application/json')
+
     try:
+        logger.info("⏳ Consultando Base de Datos PostgreSQL y procesando con Pandas...")
         query = 'SELECT * FROM public."vacunacion_aps_2026"'
         df = pd.read_sql(query, engine)
 
@@ -147,11 +154,11 @@ def api_get_datos_vacunacion():
             return jsonify({"registros": [], "columnas_db": []})
 
         # =================================================================
-        # REGLA DE TRANSFORMACIÓN DASHBOARD: CAJACOPI -> PROTEGER
+        # 🚀 REGLA DE TRANSFORMACIÓN DASHBOARD: CAJACOPI -> PROTEGER
         # =================================================================
         col_22 = next((c for c in df.columns if '22_aseguradora' in c.lower()), None)
         col_133 = next((c for c in df.columns if '133_aseguradora' in c.lower()), None)
-
+        
         for col in [col_22, col_133]:
             if col:
                 df[col] = df[col].replace(to_replace=r'(?i)CAJACOPI', value='PROTEGER', regex=True)
@@ -172,6 +179,11 @@ def api_get_datos_vacunacion():
             "columnas_db": columnas_df
         }, ensure_ascii=False, default=str)
 
+        # 2. GUARDAR EN CACHÉ
+        CACHE_DASHBOARD["payload"] = datos_json
+        CACHE_DASHBOARD["timestamp"] = time.time()
+        logger.info("✅ Caché actualizado exitosamente tras consulta a BD.")
+
         return Response(datos_json, mimetype='application/json')
     except Exception as e:
         logger.error(f"❌ Error en /api/vacunacion/datos: {str(e)}")
@@ -181,10 +193,16 @@ def api_get_datos_vacunacion():
 @app.route("/api/vacunacion/sync", methods=["POST"])
 @require_auth
 def api_sync_vacunacion():
+    global CACHE_DASHBOARD
     log_stream = io.StringIO()
     try:
         etl = ETLVacunacion(log_stream)
         etl.procesar()
+        
+        # 🚀 INVALIDAR CACHÉ: Hay datos nuevos en la BD, forzamos recarga en el dashboard
+        CACHE_DASHBOARD["payload"] = None
+        logger.info("🔄 Caché invalidado debido a una nueva sincronización.")
+        
         return jsonify({"status": "success", "logs": log_stream.getvalue()})
     except Exception as e:
         return jsonify({"status": "error", "logs": log_stream.getvalue() + f"\n❌ ERROR: {str(e)}"})
@@ -216,7 +234,6 @@ def api_exportar_vacunacion():
 @app.route("/download/<filename>")
 def download_file(filename):
     return send_file(os.path.join(DIR_BASE, filename), as_attachment=True)
-
 
 # =====================================================================
 # CLASE LOGICA: PIPELINE ETL (EXTRACCIÓN Y TRADUCCIÓN DE FECHAS)
@@ -371,7 +388,6 @@ class ETLVacunacion:
                     f'DELETE FROM public."{tabla_destino}" WHERE "{columna_pk}" NOT IN (SELECT "{columna_pk}" FROM temp_ids_vac)'))
                 self.logger.info(f"Se eliminaron {res.rowcount} registros obsoletos.")
         self.logger.info(f"--- Proceso finalizado. Total activos sincronizados: {total_procesados} ---")
-
 
 # =====================================================================
 # CLASE LOGICA: EXPORTACIÓN VECTORIAL ULTRA-RÁPIDA Y A PRUEBA DE FALLOS
@@ -548,7 +564,7 @@ class ExcelVacunacion:
         if df.empty: raise Exception("No hay registros en el rango de fechas seleccionado.")
 
         # =================================================================
-        # REGLA DE TRANSFORMACIÓN GLOBAL PARA EXCEL: CAJACOPI -> PROTEGER
+        # 🚀 REGLA DE TRANSFORMACIÓN GLOBAL PARA EXCEL: CAJACOPI -> PROTEGER
         # =================================================================
         df = df.replace(to_replace=r'(?i)CAJACOPI', value='PROTEGER', regex=True)
         # =================================================================
@@ -585,7 +601,6 @@ class ExcelVacunacion:
         self.logger.info("✅ Archivo Excel estructurado con éxito.")
         output.seek(0)
         return output
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT_VACUNACION", 5002))
