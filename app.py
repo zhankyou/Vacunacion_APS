@@ -171,25 +171,34 @@ def api_get_datos_vacunacion():
         df['lat'] = df['lat_1_geopunto'] if 'lat_1_geopunto' in df.columns else None
         df['lng'] = df['long_1_geopunto'] if 'long_1_geopunto' in df.columns else None
 
-        # Rellenar nulos sin crear copias extra (ahorra RAM)
-        df.fillna('', inplace=True)
         columnas_df = list(df.columns)
 
         # =================================================================
-        # 🛡️ BYPASS DE MEMORIA: EVITAMOS CREAR DICCIONARIOS PESADOS EN PYTHON
+        # 🛡️ FIX OOM RENDER: Evitar choque de RAM por tipos incompatibles
         # =================================================================
-        # 1. Usamos to_json de Pandas (Motor C) para convertir directamente a string
+        # Convertimos las columnas numéricas (float) a objeto primero. 
+        # Esto evita que Pandas clone la tabla entera al inyectar strings vacíos ('').
+        for col in df.select_dtypes(include=['float64', 'float32']).columns:
+            df[col] = df[col].astype(object)
+            
+        df.fillna('', inplace=True)
+        # =================================================================
+
+        # =================================================================
+        # 🛡️ BYPASS DE MEMORIA: EVITAMOS CREAR DICCIONARIOS PESADOS
+        # =================================================================
+        # Usamos to_json de Pandas (Motor C) para convertir directamente a string
         registros_json = df.to_json(orient='records', force_ascii=False)
         columnas_json = json.dumps(columnas_df, ensure_ascii=False)
         
-        # 2. DESTRUIMOS el DataFrame gigante para liberar RAM antes de unir los strings
+        # DESTRUIMOS el DataFrame gigante para liberar RAM 
         del df
         gc.collect()
 
-        # 3. Concatenamos los strings de forma cruda para el payload final
+        # Concatenamos los strings de forma cruda para el payload final
         datos_json = f'{{"columnas_db": {columnas_json}, "registros": {registros_json}}}'
 
-        # 4. GUARDAR EN CACHÉ
+        # GUARDAR EN CACHÉ
         CACHE_DASHBOARD["payload"] = datos_json
         CACHE_DASHBOARD["timestamp"] = time.time()
         logger.info("✅ Caché actualizado y RAM liberada exitosamente tras consulta a BD.")
